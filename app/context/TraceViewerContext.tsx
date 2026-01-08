@@ -6,7 +6,7 @@
 
 import { createContext, useContext } from 'react';
 import type { ParsedTrace, TraceDiff, RegressionResult } from '@/lib/trace-parser';
-import type { BaselineTrace } from '@/lib/baseline-storage';
+import type { BaselineTrace } from '@/lib/baseline-storage-api';
 import type { ViewMode } from '@/app/types';
 
 export interface TraceViewerContextType {
@@ -38,9 +38,9 @@ export interface TraceViewerContextType {
   // Actions
   handleTraceInput: (content: string, slot: 'baseline' | 'current') => void;
   handleFileUpload: (file: File, slot: 'baseline' | 'current') => void;
-  handleAddToBaselines: (name: string) => BaselineTrace | undefined;
-  handleRemoveBaseline: (id: string) => void;
-  handleSelectBaseline: (baseline: BaselineTrace) => void;
+  handleAddToBaselines: (name: string) => Promise<BaselineTrace | undefined>;
+  handleRemoveBaseline: (id: string) => Promise<void>;
+  handleSelectBaseline: (baseline: BaselineTrace) => Promise<void>;
   showLine: (lineNumber: number) => void;
   clearAll: () => void;
 }

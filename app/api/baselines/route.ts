@@ -7,24 +7,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import type { ParsedTrace } from '@/lib/trace-parser';
-import { extractSelectionPath } from '@/lib/baseline-storage';
+import { extractSelectionPath } from '@/lib/baseline-storage-api';
+
+// Demo user ID for unauthenticated access
+const DEMO_USER_ID = 'demo-user-00000000-0000-0000-0000-000000000000';
 
 // GET /api/baselines - List all baselines for current user
 export async function GET(request: NextRequest) {
   try {
-    // Get user from auth header
+    // Get user from auth header, or use demo user
     const authHeader = request.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let userId = DEMO_USER_ID;
 
-    // Verify user session with admin client
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    if (authHeader) {
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+      if (!authError && user) {
+        userId = user.id;
+      }
     }
 
     // Fetch baselines with trace data
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
           parsed_data
         )
       `)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (error || !baselines) {
@@ -74,19 +75,17 @@ export async function GET(request: NextRequest) {
 // POST /api/baselines - Create new baseline
 export async function POST(request: NextRequest) {
   try {
-    // Get user from auth header
+    // Get user from auth header, or use demo user
     const authHeader = request.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let userId = DEMO_USER_ID;
 
-    // Verify user session
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    if (authHeader) {
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+      if (!authError && user) {
+        userId = user.id;
+      }
     }
 
     // Parse request body
@@ -113,7 +112,7 @@ export async function POST(request: NextRequest) {
     const { data: usage } = await supabaseAdmin
       .from('user_storage_usage')
       .select('total_mb')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     // Type assertion for usage data
@@ -130,7 +129,7 @@ export async function POST(request: NextRequest) {
     const { data: traceData, error: traceError } = await (supabaseAdmin
       .from('traces') as any)
       .insert({
-        user_id: user.id,
+        user_id: userId,
         filename,
         raw_content: rawContent,
         parsed_data: trace as unknown as Record<string, unknown>,
@@ -151,7 +150,7 @@ export async function POST(request: NextRequest) {
     const { data: baselineData, error: baselineError } = await (supabaseAdmin
       .from('baselines') as any)
       .insert({
-        user_id: user.id,
+        user_id: userId,
         name,
         filename,
         trace_id: traceData.id,

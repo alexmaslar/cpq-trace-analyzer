@@ -7,7 +7,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { parseTrace, compareTraces, compareBehavior } from '@/lib/trace-parser';
-import { addBaseline, removeBaseline, getBaselines, findBestMatch, rankBaselines } from '@/lib/baseline-storage';
+import { addBaseline, removeBaseline, getBaselines, findBestMatch, rankBaselines } from '@/lib/baseline-storage-api';
 import { TraceViewerContextProvider } from '@/app/context/TraceViewerContext';
 import { useSearchMatches } from '@/app/hooks/useSearchMatches';
 import { Header } from '@/app/components/layout/Header';
@@ -21,7 +21,7 @@ import { CompareTab } from '@/app/components/tabs/CompareTab';
 import { RegressionTab } from '@/app/components/tabs/RegressionTab';
 import { AddToBaselineButton } from '@/app/components/regression/AddToBaselineButton';
 import type { ParsedTrace, TraceDiff, RegressionResult } from '@/lib/trace-parser';
-import type { BaselineTrace } from '@/lib/baseline-storage';
+import type { BaselineTrace } from '@/lib/baseline-storage-api';
 import type { ViewMode, TabId } from '@/app/types';
 
 export default function Home() {
@@ -45,28 +45,35 @@ export default function Home() {
   // Calculate search match counts per tab
   const matchCounts = useSearchMatches(baselineTrace, searchTerm);
 
-  // Load baselines from localStorage on mount
+  // Load baselines from API on mount
   useEffect(() => {
-    setBaselineLibrary(getBaselines());
+    const loadBaselines = async () => {
+      const baselines = await getBaselines();
+      setBaselineLibrary(baselines);
+    };
+    loadBaselines();
   }, []);
 
   // Auto-compare against baselines when a trace is loaded
   useEffect(() => {
-    if (baselineTrace && baselineLibrary.length > 0 && viewMode === 'single') {
-      const match = findBestMatch(baselineTrace);
-      if (match && match.matchScore > 0) {
-        const result = compareBehavior(match.baseline.trace, baselineTrace, {
-          id: match.baseline.id,
-          name: match.baseline.name,
-          matchScore: match.matchScore,
-        });
-        setRegressionResult(result);
-        setSelectedBaselineId(match.baseline.id);
-      } else {
-        setRegressionResult(null);
-        setSelectedBaselineId(null);
+    const runComparison = async () => {
+      if (baselineTrace && baselineLibrary.length > 0 && viewMode === 'single') {
+        const match = await findBestMatch(baselineTrace);
+        if (match && match.matchScore > 0) {
+          const result = compareBehavior(match.baseline.trace, baselineTrace, {
+            id: match.baseline.id,
+            name: match.baseline.name,
+            matchScore: match.matchScore,
+          });
+          setRegressionResult(result);
+          setSelectedBaselineId(match.baseline.id);
+        } else {
+          setRegressionResult(null);
+          setSelectedBaselineId(null);
+        }
       }
-    }
+    };
+    runComparison();
   }, [baselineTrace, baselineLibrary, viewMode]);
 
   // Keyboard shortcuts: Alt+1-5 for tab navigation
@@ -156,31 +163,44 @@ export default function Home() {
   );
 
   const handleAddToBaselines = useCallback(
-    (name: string) => {
-      if (!baselineTrace) return;
-      const baseline = addBaseline(name, traceFilename || 'unnamed.txt', baselineTrace);
-      setBaselineLibrary(getBaselines());
-      return baseline;
+    async (name: string) => {
+      if (!baselineTrace || !rawTraceContent) return;
+      try {
+        const baseline = await addBaseline(name, traceFilename || 'unnamed.txt', rawTraceContent, baselineTrace);
+        const baselines = await getBaselines();
+        setBaselineLibrary(baselines);
+        return baseline;
+      } catch (error) {
+        console.error('Failed to add baseline:', error);
+        setError(`Failed to save baseline: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return undefined;
+      }
     },
-    [baselineTrace, traceFilename]
+    [baselineTrace, traceFilename, rawTraceContent]
   );
 
   const handleRemoveBaseline = useCallback(
-    (id: string) => {
-      removeBaseline(id);
-      setBaselineLibrary(getBaselines());
-      if (selectedBaselineId === id) {
-        setRegressionResult(null);
-        setSelectedBaselineId(null);
+    async (id: string) => {
+      try {
+        await removeBaseline(id);
+        const baselines = await getBaselines();
+        setBaselineLibrary(baselines);
+        if (selectedBaselineId === id) {
+          setRegressionResult(null);
+          setSelectedBaselineId(null);
+        }
+      } catch (error) {
+        console.error('Failed to remove baseline:', error);
+        setError(`Failed to remove baseline: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
     [selectedBaselineId]
   );
 
   const handleSelectBaseline = useCallback(
-    (baseline: BaselineTrace) => {
+    async (baseline: BaselineTrace) => {
       if (!baselineTrace) return;
-      const rankedBaselines = rankBaselines(baselineTrace);
+      const rankedBaselines = await rankBaselines(baselineTrace);
       const match = rankedBaselines.find((m) => m.baseline.id === baseline.id);
       const matchScore = match?.matchScore ?? 0;
       const result = compareBehavior(baseline.trace, baselineTrace, {

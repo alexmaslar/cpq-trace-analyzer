@@ -8,6 +8,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import type { ParsedTrace } from '@/lib/trace-parser';
 
+// Demo user ID for unauthenticated access
+const DEMO_USER_ID = 'demo-user-00000000-0000-0000-0000-000000000000';
+
 // GET /api/baselines/[id] - Get specific baseline
 export async function GET(
   request: NextRequest,
@@ -16,19 +19,17 @@ export async function GET(
   try {
     const { id } = await params;
 
-    // Get user from auth header
+    // Get user from auth header, or use demo user
     const authHeader = request.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let userId = DEMO_USER_ID;
 
-    // Verify user session
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    if (authHeader) {
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+      if (!authError && user) {
+        userId = user.id;
+      }
     }
 
     // Fetch baseline with trace data
@@ -47,7 +48,7 @@ export async function GET(
         )
       `)
       .eq('id', id)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     if (error || !baseline) {
@@ -88,19 +89,17 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    // Get user from auth header
+    // Get user from auth header, or use demo user
     const authHeader = request.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let userId = DEMO_USER_ID;
 
-    // Verify user session
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    if (authHeader) {
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+      if (!authError && user) {
+        userId = user.id;
+      }
     }
 
     // Get baseline to find associated trace
@@ -108,7 +107,7 @@ export async function DELETE(
       .from('baselines')
       .select('trace_id')
       .eq('id', id)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     if (fetchError || !baseline) {
@@ -127,7 +126,7 @@ export async function DELETE(
       .from('baselines')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id);
+      .eq('user_id', userId);
 
     if (deleteError) {
       console.error('Error deleting baseline:', deleteError);

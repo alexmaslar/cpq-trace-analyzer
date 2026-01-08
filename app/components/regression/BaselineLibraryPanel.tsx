@@ -7,7 +7,7 @@
 import { useMemo } from 'react';
 import { Archive } from 'lucide-react';
 import type { ParsedTrace } from '@/lib/trace-parser';
-import type { BaselineTrace } from '@/lib/baseline-storage';
+import type { BaselineTrace } from '@/lib/baseline-storage-api';
 
 interface BaselineLibraryPanelProps {
   baselines: BaselineTrace[];
@@ -61,7 +61,7 @@ export function BaselineLibraryPanel({
       <div className="px-6 py-4 border-b border-gray-800">
         <h2 className="text-lg font-semibold text-white">Baseline Library</h2>
         <p className="text-xs text-gray-500 mt-1">
-          Baselines are stored in your browser's local storage and persist across sessions.
+          Baselines are stored in the database and persist across sessions.
         </p>
       </div>
 

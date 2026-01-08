@@ -7,7 +7,7 @@
 import { RegressionResultsView } from '@/app/components/regression/RegressionResultsView';
 import { BaselineLibraryPanel } from '@/app/components/regression/BaselineLibraryPanel';
 import type { RegressionResult, ParsedTrace } from '@/lib/trace-parser';
-import type { BaselineTrace } from '@/lib/baseline-storage';
+import type { BaselineTrace } from '@/lib/baseline-storage-api';
 
 interface RegressionTabProps {
   regressionResult: RegressionResult | null;

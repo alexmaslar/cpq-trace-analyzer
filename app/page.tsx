@@ -1,65 +1,335 @@
-import Image from "next/image";
+/**
+ * CPQ Trace Analyzer - Main Page (Orchestration Only)
+ * Manages state and renders tab-based interface
+ */
+
+'use client';
+
+import { useState, useCallback, useEffect } from 'react';
+import { parseTrace, compareTraces, compareBehavior } from '@/lib/trace-parser';
+import { addBaseline, removeBaseline, getBaselines, findBestMatch, rankBaselines } from '@/lib/baseline-storage';
+import { TraceViewerContextProvider } from '@/app/context/TraceViewerContext';
+import { useSearchMatches } from '@/app/hooks/useSearchMatches';
+import { Header } from '@/app/components/layout/Header';
+import { TabNavigation } from '@/app/components/layout/TabNavigation';
+import { TraceUploader } from '@/app/components/shared/TraceUploader';
+import { RawTraceViewer } from '@/app/components/shared/RawTraceViewer';
+import { InfoTab } from '@/app/components/tabs/InfoTab';
+import { DebugTab } from '@/app/components/tabs/DebugTab';
+import { IntegrationTab } from '@/app/components/tabs/IntegrationTab';
+import { CompareTab } from '@/app/components/tabs/CompareTab';
+import { RegressionTab } from '@/app/components/tabs/RegressionTab';
+import { AddToBaselineButton } from '@/app/components/regression/AddToBaselineButton';
+import type { ParsedTrace, TraceDiff, RegressionResult } from '@/lib/trace-parser';
+import type { BaselineTrace } from '@/lib/baseline-storage';
+import type { ViewMode, TabId } from '@/app/types';
 
 export default function Home() {
+  // State management
+  const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [activeTab, setActiveTab] = useState<TabId>('info');
+  const [baselineTrace, setBaselineTrace] = useState<ParsedTrace | null>(null);
+  const [currentTrace, setCurrentTrace] = useState<ParsedTrace | null>(null);
+  const [diff, setDiff] = useState<TraceDiff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [rawTraceContent, setRawTraceContent] = useState<string>('');
+  const [viewerLine, setViewerLine] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [baselineLibrary, setBaselineLibrary] = useState<BaselineTrace[]>([]);
+  const [showBaselinePanel, setShowBaselinePanel] = useState(false);
+  const [regressionResult, setRegressionResult] = useState<RegressionResult | null>(null);
+  const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(null);
+  const [traceFilename, setTraceFilename] = useState<string>('');
+
+  // Calculate search match counts per tab
+  const matchCounts = useSearchMatches(baselineTrace, searchTerm);
+
+  // Load baselines from localStorage on mount
+  useEffect(() => {
+    setBaselineLibrary(getBaselines());
+  }, []);
+
+  // Auto-compare against baselines when a trace is loaded
+  useEffect(() => {
+    if (baselineTrace && baselineLibrary.length > 0 && viewMode === 'single') {
+      const match = findBestMatch(baselineTrace);
+      if (match && match.matchScore > 0) {
+        const result = compareBehavior(match.baseline.trace, baselineTrace, {
+          id: match.baseline.id,
+          name: match.baseline.name,
+          matchScore: match.matchScore,
+        });
+        setRegressionResult(result);
+        setSelectedBaselineId(match.baseline.id);
+      } else {
+        setRegressionResult(null);
+        setSelectedBaselineId(null);
+      }
+    }
+  }, [baselineTrace, baselineLibrary, viewMode]);
+
+  // Keyboard shortcuts: Alt+1-5 for tab navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const tabMap: Record<string, TabId> = {
+          '1': 'info',
+          '2': 'debug',
+          '3': 'integration',
+          '4': 'regression',
+          '5': 'compare',
+        };
+
+        const tabId = tabMap[e.key];
+        if (tabId) {
+          e.preventDefault();
+
+          // Only switch if in appropriate view mode
+          if (tabId === 'compare' && viewMode !== 'compare') {
+            return; // Compare tab only available in compare mode
+          }
+          if (tabId !== 'compare' && viewMode === 'compare') {
+            return; // Other tabs only available in single mode
+          }
+
+          if (baselineTrace && viewMode === 'single' && tabId !== 'compare') {
+            setActiveTab(tabId);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [baselineTrace, viewMode]);
+
+  // Handlers
+  const handleTraceInput = useCallback(
+    (content: string, slot: 'baseline' | 'current') => {
+      setError(null);
+      setIsLoading(true);
+
+      try {
+        const parsed = parseTrace(content);
+
+        if (slot === 'baseline') {
+          setBaselineTrace(parsed);
+          setRawTraceContent(content);
+          if (currentTrace && viewMode === 'compare') {
+            setDiff(compareTraces(parsed, currentTrace));
+          }
+        } else {
+          setCurrentTrace(parsed);
+          if (viewMode === 'single') {
+            setRawTraceContent(content);
+          }
+          if (baselineTrace && viewMode === 'compare') {
+            setDiff(compareTraces(baselineTrace, parsed));
+          }
+        }
+      } catch (e) {
+        setError(`Failed to parse trace: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [baselineTrace, currentTrace, viewMode]
+  );
+
+  const handleFileUpload = useCallback(
+    (file: File, slot: 'baseline' | 'current') => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        if (slot === 'baseline') {
+          setTraceFilename(file.name);
+        }
+        handleTraceInput(content, slot);
+      };
+      reader.onerror = () => {
+        setError('Failed to read file');
+      };
+      reader.readAsText(file);
+    },
+    [handleTraceInput]
+  );
+
+  const handleAddToBaselines = useCallback(
+    (name: string) => {
+      if (!baselineTrace) return;
+      const baseline = addBaseline(name, traceFilename || 'unnamed.txt', baselineTrace);
+      setBaselineLibrary(getBaselines());
+      return baseline;
+    },
+    [baselineTrace, traceFilename]
+  );
+
+  const handleRemoveBaseline = useCallback(
+    (id: string) => {
+      removeBaseline(id);
+      setBaselineLibrary(getBaselines());
+      if (selectedBaselineId === id) {
+        setRegressionResult(null);
+        setSelectedBaselineId(null);
+      }
+    },
+    [selectedBaselineId]
+  );
+
+  const handleSelectBaseline = useCallback(
+    (baseline: BaselineTrace) => {
+      if (!baselineTrace) return;
+      const rankedBaselines = rankBaselines(baselineTrace);
+      const match = rankedBaselines.find((m) => m.baseline.id === baseline.id);
+      const matchScore = match?.matchScore ?? 0;
+      const result = compareBehavior(baseline.trace, baselineTrace, {
+        id: baseline.id,
+        name: baseline.name,
+        matchScore,
+      });
+      setRegressionResult(result);
+      setSelectedBaselineId(baseline.id);
+    },
+    [baselineTrace]
+  );
+
+  const showLine = useCallback((lineNumber: number) => {
+    setViewerLine(lineNumber);
+  }, []);
+
+  const clearAll = () => {
+    setBaselineTrace(null);
+    setCurrentTrace(null);
+    setDiff(null);
+    setError(null);
+    setRawTraceContent('');
+    setViewerLine(null);
+    setRegressionResult(null);
+    setSelectedBaselineId(null);
+    setTraceFilename('');
+    setSearchTerm('');
+  };
+
+  // Context value
+  const contextValue = {
+    viewMode,
+    setViewMode,
+    baselineTrace,
+    currentTrace,
+    diff,
+    error,
+    isLoading,
+    rawTraceContent,
+    viewerLine,
+    searchTerm,
+    setSearchTerm,
+    baselineLibrary,
+    showBaselinePanel,
+    setShowBaselinePanel,
+    regressionResult,
+    selectedBaselineId,
+    traceFilename,
+    handleTraceInput,
+    handleFileUpload,
+    handleAddToBaselines,
+    handleRemoveBaseline,
+    handleSelectBaseline,
+    showLine,
+    clearAll,
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <TraceViewerContextProvider value={contextValue}>
+      <main className="min-h-screen bg-gray-950 text-gray-100">
+        <Header />
+
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          {/* Error Message */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-200">{error}</div>
+          )}
+
+          {/* Trace Uploaders */}
+          <div className={`grid gap-6 mb-8 ${viewMode === 'compare' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <TraceUploader
+              label={viewMode === 'compare' ? 'Baseline Trace' : 'Trace File'}
+              onFileUpload={(file) => handleFileUpload(file, 'baseline')}
+              onPaste={(content) => handleTraceInput(content, 'baseline')}
+              hasData={!!baselineTrace}
+              isLoading={isLoading}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            {viewMode === 'compare' && (
+              <TraceUploader
+                label="Current Trace"
+                onFileUpload={(file) => handleFileUpload(file, 'current')}
+                onPaste={(content) => handleTraceInput(content, 'current')}
+                hasData={!!currentTrace}
+                isLoading={isLoading}
+              />
+            )}
+          </div>
+
+          {/* Controls */}
+          {(baselineTrace || currentTrace) && (
+            <div className="mb-6 flex items-center gap-4">
+              {baselineTrace && viewMode === 'single' && (
+                <AddToBaselineButton onAdd={handleAddToBaselines} defaultName={traceFilename} />
+              )}
+              <button
+                onClick={clearAll}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm font-medium"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
+
+          {/* Tab Navigation */}
+          {baselineTrace && viewMode === 'single' && (
+            <TabNavigation
+              activeTab={activeTab}
+              viewMode={viewMode}
+              matchCounts={matchCounts}
+              onTabChange={setActiveTab}
+            />
+          )}
+
+          {/* Tab Content */}
+          {viewMode === 'single' && baselineTrace && (
+            <div className="space-y-6 tab-content-enter" key={activeTab}>
+              {activeTab === 'info' && <InfoTab trace={baselineTrace} searchTerm={searchTerm} />}
+              {activeTab === 'debug' && <DebugTab trace={baselineTrace} searchTerm={searchTerm} />}
+              {activeTab === 'integration' && <IntegrationTab trace={baselineTrace} searchTerm={searchTerm} />}
+              {activeTab === 'regression' && (
+                <RegressionTab
+                  regressionResult={regressionResult}
+                  baselineLibrary={baselineLibrary}
+                  currentTrace={baselineTrace}
+                  selectedBaselineId={selectedBaselineId}
+                  onRemoveBaseline={handleRemoveBaseline}
+                  onSelectBaseline={handleSelectBaseline}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Compare Mode Content */}
+          {viewMode === 'compare' && baselineTrace && currentTrace && diff && (
+            <CompareTab baseline={baselineTrace} current={currentTrace} diff={diff} />
+          )}
         </div>
+
+        {/* Raw Trace Viewer Modal */}
+        {viewerLine !== null && rawTraceContent && (
+          <RawTraceViewer
+            content={rawTraceContent}
+            lineNumber={viewerLine}
+            onClose={() => setViewerLine(null)}
+          />
+        )}
       </main>
-    </div>
+    </TraceViewerContextProvider>
   );
 }

@@ -24,3 +24,43 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Tab Transition Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.tab-content-enter {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+.tab-content-exit {
+  animation: fadeOut 0.15s ease-in forwards;
+}
+
+/* Smooth tab button transitions */
+.tab-button {
+  transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+  transition: all 0.15s ease;
+}

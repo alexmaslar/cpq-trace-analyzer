@@ -50,23 +50,27 @@ export async function GET(
       .eq('user_id', user.id)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
+    if (error || !baseline) {
+      if (error?.code === 'PGRST116') {
         return NextResponse.json({ error: 'Baseline not found' }, { status: 404 });
       }
       console.error('Error fetching baseline:', error);
       return NextResponse.json({ error: 'Failed to fetch baseline' }, { status: 500 });
     }
 
+    // Type assertion for joined data
+    const baselineData = baseline as any;
+    const traceData = Array.isArray(baselineData.traces) ? baselineData.traces[0] : baselineData.traces;
+
     // Transform to BaselineTrace format
     const formattedBaseline = {
-      id: baseline.id,
-      name: baseline.name,
-      filename: baseline.filename,
-      selectionPath: baseline.selection_path,
-      createdAt: new Date(baseline.created_at).getTime(),
-      rawContent: baseline.traces.raw_content,
-      trace: baseline.traces.parsed_data as ParsedTrace,
+      id: baselineData.id,
+      name: baselineData.name,
+      filename: baselineData.filename,
+      selectionPath: baselineData.selection_path,
+      createdAt: new Date(baselineData.created_at).getTime(),
+      rawContent: traceData.raw_content,
+      trace: traceData.parsed_data as ParsedTrace,
     };
 
     return NextResponse.json(formattedBaseline);
@@ -107,13 +111,16 @@ export async function DELETE(
       .eq('user_id', user.id)
       .single();
 
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
+    if (fetchError || !baseline) {
+      if (fetchError?.code === 'PGRST116') {
         return NextResponse.json({ error: 'Baseline not found' }, { status: 404 });
       }
       console.error('Error fetching baseline:', fetchError);
       return NextResponse.json({ error: 'Failed to fetch baseline' }, { status: 500 });
     }
+
+    // Type assertion for baseline data
+    const baselineData = baseline as { trace_id: string };
 
     // Delete baseline (will cascade delete trace due to foreign key constraint)
     const { error: deleteError } = await supabaseAdmin
@@ -131,7 +138,7 @@ export async function DELETE(
     await supabaseAdmin
       .from('traces')
       .delete()
-      .eq('id', baseline.trace_id);
+      .eq('id', baselineData.trace_id);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

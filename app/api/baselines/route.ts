@@ -45,21 +45,24 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (error) {
+    if (error || !baselines) {
       console.error('Error fetching baselines:', error);
       return NextResponse.json({ error: 'Failed to fetch baselines' }, { status: 500 });
     }
 
     // Transform to BaselineTrace format
-    const formattedBaselines = baselines.map(baseline => ({
-      id: baseline.id,
-      name: baseline.name,
-      filename: baseline.filename,
-      selectionPath: baseline.selection_path,
-      createdAt: new Date(baseline.created_at).getTime(),
-      rawContent: baseline.traces.raw_content,
-      trace: baseline.traces.parsed_data as ParsedTrace,
-    }));
+    const formattedBaselines = baselines.map((baseline: any) => {
+      const traceData = Array.isArray(baseline.traces) ? baseline.traces[0] : baseline.traces;
+      return {
+        id: baseline.id,
+        name: baseline.name,
+        filename: baseline.filename,
+        selectionPath: baseline.selection_path,
+        createdAt: new Date(baseline.created_at).getTime(),
+        rawContent: traceData.raw_content,
+        trace: traceData.parsed_data as ParsedTrace,
+      };
+    });
 
     return NextResponse.json(formattedBaselines);
   } catch (error) {
@@ -113,7 +116,10 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .single();
 
-    if (usage && usage.total_mb >= 50) {
+    // Type assertion for usage data
+    const usageData = usage as { total_mb: number } | null;
+
+    if (usageData && usageData.total_mb >= 50) {
       return NextResponse.json(
         { error: 'Storage quota exceeded. Maximum 50MB per user.' },
         { status: 403 }
@@ -121,8 +127,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Create trace first
-    const { data: traceData, error: traceError } = await supabaseAdmin
-      .from('traces')
+    const { data: traceData, error: traceError } = await (supabaseAdmin
+      .from('traces') as any)
       .insert({
         user_id: user.id,
         filename,
@@ -142,8 +148,8 @@ export async function POST(request: NextRequest) {
     const selectionPath = extractSelectionPath(trace);
 
     // Create baseline referencing the trace
-    const { data: baselineData, error: baselineError } = await supabaseAdmin
-      .from('baselines')
+    const { data: baselineData, error: baselineError } = await (supabaseAdmin
+      .from('baselines') as any)
       .insert({
         user_id: user.id,
         name,
